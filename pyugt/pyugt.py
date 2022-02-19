@@ -41,6 +41,7 @@ else:
 from PIL import Image, ImageTk, ImageFilter, ImageMath
 # To show error message boxes and textboxes with scrollbars
 from tkinter import messagebox, scrolledtext
+from transformers import MarianMTModel, MarianTokenizer
 
 ## External modules
 # For global hotkeys (TODO: find another library to support MacOSX)
@@ -49,10 +50,6 @@ import keyboard
 import mss
 # For Optical Character Recognition
 import pytesseract
-
-## External modules - importing subpackage
-# For translation - TODO: try to find a Japanese -> English offline translator, not good to be relying on an unofficial Google API, can change at any time
-from googletrans import Translator
 
 ## Import version
 # Get version, better than importing the module because can fail if the requirements aren't met
@@ -344,12 +341,32 @@ class TranslationBox(threading.Thread):
         self.root.lift()
         self.root.attributes('-topmost', 'true')
 
+
+model_name = "gsarti/opus-tatoeba-eng-pol"
+tokenizer = MarianTokenizer.from_pretrained(model_name)
+model = MarianMTModel.from_pretrained(model_name)
+
 def gtranslate(ocrtext, langsource_trans, langtarget):
-    """Translate using Google Translate through the googletrans (unofficial) wrapper module"""
-    translator = Translator()
-    transobj = translator.translate(ocrtext, src=langsource_trans, dest=langtarget)
-    transtext = transobj.text
-    return transtext
+
+    def split_by_characters(text):
+        result = []
+        actual = ""
+        for idx in range(len(text) - 1):
+            ch = text[idx]
+            if not ch.isalnum() and ch not in " .?!'":
+                continue
+            next_ch = text[idx + 1]
+            actual += ch
+            if ch in ".?!" and next_ch == " ":
+                result.append(actual.strip()[0].upper() + actual.strip()[1:])
+                actual = ""
+        result.append(actual.strip()[0].upper() + actual.strip()[1:])
+        return result
+
+    ocrtext = split_by_characters(ocrtext)
+    translated = model.generate(**tokenizer(ocrtext, return_tensors="pt", padding=True))
+    translated_text = [tokenizer.decode(t, skip_special_tokens=True) for t in translated]
+    return " ".join(translated_text)
 
 def translateRegion(sct, TBox, config, configFile):
     """Capture a screenshot of a previously defined region, detect with Tesseract OCR and translate via Google Translator"""
